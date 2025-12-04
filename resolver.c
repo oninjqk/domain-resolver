@@ -1,139 +1,54 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <netdb.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <sys/select.h>
-#include <netinet/in.h>
+#include <netdb.h>
 
-#define timeout 2
+/*
+i dont know what the hell i did, i think put in the wrong code lmao
+what i was doing was wrong, after months i came to read this crap and I got scared...
+and thats why I made these adjustments
+*/
 
-void resolve(const char *host) {
-    struct addrinfo hints, *res, *cur;
-    char ipstr[inet6_addrstrlen];
+#define MAX_IP_LEN INET6_ADDRSTRLEN
 
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = af_unspec;
-    hints.ai_socktype = sock_stream;
+void get_ips(const char *host) {
+    struct addrinfo hints = {0}, *res, *p;
+    hints.ai_family = AF_UNSPEC; // ipv4 or ipv6, or use AF_INET for ipv4 or AF_INET6 to ipv6
+    hints.ai_socktype = 0;   // any socket
 
-    if (getaddrinfo(host, null, &hints, &res) != 0) return;
+    if (getaddrinfo(host, NULL, &hints, &res) != 0) {
+        perror("getaddrinfo");
+        return;
+    }
 
-    printf("ips for %s:\n", host);
-
-    for (cur = res; cur != null; cur = cur->ai_next) {
+    printf("IPs for %s:\n", host);
+    for (p = res; p != NULL; p = p->ai_next) { // goes through the shit that returned
+        char ip[MAX_IP_LEN];
         void *addr;
-        char *ver;
+        const char *ver;
 
-        if (cur->ai_family == af_inet) {
-            addr = &((struct sockaddr_in*)cur->ai_addr)->sin_addr;
-            ver = "ipv4";
+        if (p->ai_family == AF_INET) {
+            addr = &((struct sockaddr_in *)p->ai_addr)->sin_addr;
+            ver = "IPv4";
+        } else if (p->ai_family == AF_INET6) {
+            addr = &((struct sockaddr_in6 *)p->ai_addr)->sin6_addr;
+            ver = "IPv6";
         } else {
-            addr = &((struct sockaddr_in6*)cur->ai_addr)->sin6_addr;
-            ver = "ipv6";
+            continue;
         }
 
-        inet_ntop(cur->ai_family, addr, ipstr, sizeof ipstr);
-        printf("  %s: %s\n", ver, ipstr);
+        inet_ntop(p->ai_family, addr, ip, sizeof(ip)); //converts bin to string (4 bytes for ipv4 or 16 bytes to ipv6)
+        printf("  %s: %s\n", ver, ip); // print this shit
     }
 
-    freeaddrinfo(res);
-}
-
-int port_check(const char *ip, int port) {
-    int sock = socket(af_inet, sock_stream, 0);
-    if (sock < 0) return 0;
-
-    struct sockaddr_in addr = {0};
-    addr.sin_family = af_inet;
-    addr.sin_port = htons(port);
-    if (inet_pton(af_inet, ip, &addr.sin_addr) <= 0) {
-        close(sock);
-        return 0;
-    }
-
-    int flags = fcntl(sock, f_getfl, 0);
-    fcntl(sock, f_setfl, flags | o_nonblock);
-
-    connect(sock, (struct sockaddr*)&addr, sizeof addr);
-
-    fd_set fdset;
-    fd_zero(&fdset);
-    fd_set(sock, &fdset);
-    struct timeval tv = {timeout, 0};
-
-    if (select(sock + 1, null, &fdset, null, &tv) > 0) {
-        int err = 0;
-        socklen_t len = sizeof err;
-        getsockopt(sock, sol_socket, so_error, &err, &len);
-        close(sock);
-        return err == 0;
-    }
-
-    close(sock);
-    return 0;
-}
-
-int real_ip(const char *host, int port, char *out_ip, size_t out_len) {
-    struct addrinfo hints = {0}, *res, *cur;
-    hints.ai_family = af_inet;
-    hints.ai_socktype = sock_stream;
-
-    if (getaddrinfo(host, null, &hints, &res) != 0) return 0;
-
-    int sock = -1;
-    for (cur = res; cur != null; cur = cur->ai_next) {
-        sock = socket(af_inet, sock_stream, 0);
-        if (sock < 0) continue;
-
-        struct sockaddr_in addr = *(struct sockaddr_in *)cur->ai_addr;
-        addr.sin_port = htons(port);
-
-        if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-            struct sockaddr_in real_addr;
-            socklen_t len = sizeof(real_addr);
-            if (getpeername(sock, (struct sockaddr *)&real_addr, &len) == 0) {
-                inet_ntop(af_inet, &real_addr.sin_addr, out_ip, out_len);
-                close(sock);
-                freeaddrinfo(res);
-                return 1;
-            }
-            close(sock);
-        } else {
-            close(sock);
-        }
-    }
-    freeaddrinfo(res);
-    return 0;
+    freeaddrinfo(res); // no memory leak monkey
 }
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("usage: %s <host>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <domain>\n", argv[0]);
         return 1;
     }
 
-    const char *host = argv[1];
-
-    resolve(host);
-
-    char real_ip[inet_addrstrlen] = {0};
-    if (!real_ip(host, 443, real_ip, sizeof(real_ip))) {
-        printf("could not connect to %s on port 443\n", host);
-        return 1;
-    }
-
-    printf("\nreal connected ip on port 443: %s\n", real_ip);
-
-    int ports[] = {80, 443, 22, 21, 3306};
-    printf("testing open ports on %s:\n", real_ip);
-    for (int i = 0; i < sizeof(ports) / sizeof(ports[0]); i++) {
-        if (port_check(real_ip, ports[i])) {
-            printf(" port %d: open\n", ports[i]);
-        }
-    }
-
+    get_ips(argv[1]);
     return 0;
 }
